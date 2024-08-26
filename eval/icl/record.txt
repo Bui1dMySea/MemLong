@@ -1,0 +1,12 @@
+            k   cache-k    MPQA    SST2    SST5    MR    SUBJ
+OpenLLAMA   0     NaN     0.7053   
+OpenLLAMA   4     NaN
+LongLLaMA   4     18
+MemLong     4     18
+MemLong     4     38
+MemLong     4     38
+OpenLLAMA   20    NaN
+LongLLaMA   20    18
+MemLong     20    18
+MemLong     20    38
+MemLong     20    38

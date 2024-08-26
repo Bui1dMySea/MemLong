@@ -8,7 +8,7 @@ stage_2_*
 /eval/LongBench
 /eval/LongEval
 /utils
-train_clm_no
+/train_clm_no_trainer_base.py
 /eval/icl/data
 /eval/icl/script
 /eval/icl/result

@@ -37,24 +37,24 @@ from torch.cuda import device_count
 from accelerate import Accelerator, DistributedType
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
+from accelerate.utils import (
+    DummyOptim,
+    DummyScheduler,
+)
 import transformers
 from transformers import (
     CONFIG_MAPPING,
     MODEL_MAPPING,
     SchedulerType,
-    # default_data_collator,
     DataCollatorForLanguageModeling,
     get_scheduler,
 )
 from transformers.utils.versions import require_version
+from transformers import AutoTokenizer
 from huggingface_hub import Repository, create_repo
 import datasets
 from datasets import load_from_disk, load_dataset
 from wandb.util import generate_id
-from accelerate.utils import (
-    DummyOptim,
-    DummyScheduler,
-)
 from functools import partial
 from src.utils import (
     BatchSequentialSampler,
@@ -68,14 +68,12 @@ from src.utils import (
 )
 from src.configuration_llama import LlamaConfig
 from src.modeling_llama_position import LlamaForCausalLM
-# from src.modeling_llama import LlamaForCausalLM
 
-from transformers import AutoTokenizer
+
 from peft import PeftModel
 
 from deepspeed.runtime.zero.stage_1_and_2 import (estimate_zero2_model_states_mem_needs_all_live,)
 from functools import partial
-from torch.nn import KLDivLoss
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 
@@ -86,65 +84,30 @@ DEFAULT_BOS_TOKEN = "<s>"
 DEFAULT_UNK_TOKEN = "<unk>"
 
 
-# check_min_version("4.36.0.dev0")
+check_min_version("4.36.0.dev0")
 
 logger = get_logger(__name__)
-
 require_version(
     "datasets>=1.8.0",
     "To fix: pip install -r examples/pytorch/language-modeling/requirements.txt",
 )
-
 MODEL_CONFIG_CLASSES = list(MODEL_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Finetune a transformers model on a causal language modeling task"
-    )
+    parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")
 
-    parser.add_argument(
-        "--load_from_disk",
-        type=str,
-    )
-    parser.add_argument(
-        "--embedder_path",
-        type=str,
-    )
-    parser.add_argument(
-        "--mem_layer",
-        type=int,
-    )
-    parser.add_argument(
-        "--ret_attn_layers",
-        nargs="+",
-        type=int,
-    )
-    
-    parser.add_argument(
-        "--last_context_length",
-        type=int,
-    )
-    
-    parser.add_argument(
-        "--batch_sequential",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--clear_memories_on_eos_token_id", default=None, action="store_true"
-    )
-    parser.add_argument(
-        "--clear_memories_on_bos_token_id", default=None, action="store_true"
-    )
-    parser.add_argument(
-        "--circulate_steps",
-        default=512,
-        type=int,
-    )
+    parser.add_argument("--load_from_disk",type=str,help="load dataset from disk")
+    parser.add_argument("--embedder_path",type=str,help="用于检索的 embedder 的路径")
+    parser.add_argument("--mem_layer",type=int,help="记忆层所在位置")
+    parser.add_argument("--ret_attn_layers",nargs="+",type=int,help="检索层所在位置")
+    parser.add_argument("--last_context_length",type=int,help="生成时最后一个上下文的长度")
+    parser.add_argument("--batch_sequential",default=False,action="store_true",help="是否按照顺序生成batch")
+    parser.add_argument("--clear_memories_on_eos_token_id", default=None, action="store_true")
+    parser.add_argument("--clear_memories_on_bos_token_id", default=None, action="store_true")
+    parser.add_argument("--circulate_steps",default=512,type=int)
     parser.add_argument("--ret_group_size", type=int, help="每个块检索的数量")
     parser.add_argument("--pooling_tokens", default=None, required=False,type=int, help="压缩的tokens数量")
-    # parser.add_argument("--ret_granularity", type=int, help="检索粒度")
     parser.add_argument("--mem_group_size", type=int, help="mem粒度")
     parser.add_argument("--use_gate",action="store_true",)
     parser.add_argument("--use_gpu_to_search", action="store_true")
@@ -153,248 +116,50 @@ def parse_args():
     parser.add_argument("--use_cache", action="store_true",default=False)
     parser.add_argument("--position_type",choices=["Zero","Continual"],default=None)
 
-    parser.add_argument(
-        "--task",
-        type=str,
-        default="lrlm",
-        choices=["qa", "icl", "chat", "lrlm", "tool", "convsearch"],
-    )
-    parser.add_argument(
-        "--load_llama_config",
-        type=str,
-        default=None,
-    )
-    parser.add_argument(
-        "--dataset_name",
-        type=str,
-        default=None,
-        help="The name of the dataset to use (via the datasets library).",
-    )
-    parser.add_argument(
-        "--dataset_config_name",
-        type=str,
-        default=None,
-        help="The configuration name of the dataset to use (via the datasets library).",
-    )
-    parser.add_argument(
-        "--train_file",
-        type=str,
-        default=None,
-        help="A csv, txt or a json file containing the training data.",
-    )
-    parser.add_argument(
-        "--validation_file",
-        type=str,
-        default=None,
-        help="A csv, txt or a json file containing the validation data.",
-    )
-    parser.add_argument(
-        "--validation_split_percentage",
-        default=5,
-        help="The percentage of the train set used as validation set in case there's no validation split",
-    )
-    parser.add_argument(
-        "--model_name_or_path",
-        type=str,
-        default="./7B",
-        help="Path to pretrained model or model identifier from huggingface.co/models.",
-        required=False,
-    )
-    parser.add_argument(
-        "--config_name",
-        type=str,
-        default=None,
-        help="Pretrained config name or path if not the same as model_name",
-    )
-    parser.add_argument(
-        "--tokenizer_name",
-        type=str,
-        default=None,
-        help="Pretrained tokenizer name or path if not the same as model_name",
-    )
-    parser.add_argument(
-        "--use_slow_tokenizer",
-        action="store_true",
-        help="If passed, will use a slow tokenizer (not backed by the 🤗 Tokenizers library).",
-    )
-    parser.add_argument(
-        "--per_device_train_batch_size",
-        type=int,
-        default=8,
-        help="Batch size (per device) for the training dataloader.",
-    )
-    parser.add_argument(
-        "--per_device_eval_batch_size",
-        type=int,
-        default=8,
-        help="Batch size (per device) for the evaluation dataloader.",
-    )
-    parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=5e-5,
-        help="Initial learning rate (after the potential warmup period) to use.",
-    )
-    parser.add_argument(
-        "--weight_decay", type=float, default=0.0, help="Weight decay to use."
-    )
-    parser.add_argument(
-        "--num_train_epochs",
-        type=int,
-        default=1,
-        help="Total number of training epochs to perform.",
-    )
-    parser.add_argument(
-        "--max_train_steps",
-        type=int,
-        default=None,
-        help="Total number of training steps to perform. If provided, overrides num_train_epochs.",
-    )
-    parser.add_argument(
-        "--embedder_name",
-        type=str,
-        default=None,
-    )
-    parser.add_argument(
-        "--gradient_accumulation_steps",
-        type=int,
-        default=8,
-        help="Number of updates steps to accumulate before performing a backward/update pass.",
-    )
-    parser.add_argument(
-        "--lr_scheduler_type",
-        type=SchedulerType,
-        default="cosine_with_restarts",
-        help="The scheduler type to use.",
-        choices=[
-            "linear",
-            "cosine",
-            "cosine_with_restarts",
-            "polynomial",
-            "constant",
-            "constant_with_warmup",
-        ],
-    )
+    parser.add_argument("--task",type=str,default="lrlm",choices=["qa", "icl", "chat", "lrlm", "tool", "convsearch"],)
+    parser.add_argument("--load_llama_config",type=str,default=None,)
+    parser.add_argument("--dataset_name",type=str,default=None,help="The name of the dataset to use (via the datasets library).",)
+    parser.add_argument("--dataset_config_name",type=str,default=None,help="The configuration name of the dataset to use (via the datasets library).",)
+    parser.add_argument("--train_file",type=str,default=None,help="A csv, txt or a json file containing the training data.",)
+    parser.add_argument("--validation_file",type=str,default=None,help="A csv, txt or a json file containing the validation data.",)
+    parser.add_argument("--validation_split_percentage",default=5,help="The percentage of the train set used as validation set in case there's no validation split",)
+    parser.add_argument("--model_name_or_path",type=str,help="Path to pretrained model or model identifier from huggingface.co/models.",)
+    parser.add_argument("--config_name",type=str,default=None,help="Pretrained config name or path if not the same as model_name",)
+    parser.add_argument("--tokenizer_name",type=str,default=None,help="Pretrained tokenizer name or path if not the same as model_name",)
+    parser.add_argument("--use_slow_tokenizer",action="store_true",help="If passed, will use a slow tokenizer (not backed by the 🤗 Tokenizers library).",)
+    parser.add_argument("--per_device_train_batch_size",type=int,default=8,help="Batch size (per device) for the training dataloader.",)
+    parser.add_argument("--per_device_eval_batch_size",type=int,default=8,help="Batch size (per device) for the evaluation dataloader.",)
+    parser.add_argument("--learning_rate",type=float,default=5e-5,help="Initial learning rate (after the potential warmup period) to use.",)
+    parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use.")
+    parser.add_argument("--num_train_epochs",type=int,default=1,help="Total number of training epochs to perform.",)
+    parser.add_argument("--max_train_steps",type=int,default=None,help="Total number of training steps to perform. If provided, overrides num_train_epochs.",)
+    parser.add_argument("--embedder_name",type=str,default=None,)
+    parser.add_argument("--gradient_accumulation_steps",type=int,default=8,help="Number of updates steps to accumulate before performing a backward/update pass.",)
+    parser.add_argument("--lr_scheduler_type",type=SchedulerType,default="cosine_with_restarts",help="The scheduler type to use.",choices=["linear","cosine","cosine_with_restarts","polynomial","constant","constant_with_warmup",],)
     parser.add_argument("--seq_len", type=int, required=True)
-    parser.add_argument(
-        "--num_warmup_steps",
-        type=int,
-        default=1000,
-        help="Number of steps for the warmup in the lr scheduler.",
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        required=True,
-        help="Where to store the final model.",
-    )
-    parser.add_argument(
-        "--seed", type=int, default=42, help="A seed for reproducible training."
-    )
-    parser.add_argument(
-        "--model_type",
-        type=str,
-        default=None,
-        help="Model type to use if training from scratch.",
-        choices=MODEL_TYPES,
-    )
-    parser.add_argument(
-        "--block_size",
-        type=int,
-        default=None,
-        help=(
-            "Optional input sequence length after tokenization. The training dataset will be truncated in block of"
-            " this size for training. Default to the model max input length for single sentence inputs (take into"
-            " account special tokens)."
-        ),
-    )
-    parser.add_argument(
-        "--train_mode",
-        type=str,
-        default=None,
-        required=True,
-        choices=["lora-all", "lora-freeze", "partial-lora","partial-freeze"],
-    )
-    parser.add_argument(
-        "--continual_finetuning",
-        action="store_true",
-    )
+    parser.add_argument("--num_warmup_steps",type=int,default=1000,help="Number of steps for the warmup in the lr scheduler.",)
+    parser.add_argument("--output_dir",type=str,required=True,help="Where to store the final model.",)
+    parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
+    parser.add_argument("--model_type",type=str,default=None,help="Model type to use if training from scratch.",choices=MODEL_TYPES,)
+    parser.add_argument("--block_size",type=int,default=None,help=("Optional input sequence length after tokenization. The training dataset will be truncated in block of"" this size for training. Default to the model max input length for single sentence inputs (take into"" account special tokens)."),)
+    parser.add_argument("--train_mode",type=str,default=None,required=True,choices=["lora-all", "lora-freeze", "partial-lora","partial-freeze"],)
+    parser.add_argument("--continual_finetuning",action="store_true",)
 
     parser.add_argument("--freeze_layers", type=str,default=None)
-    parser.add_argument(
-        "--update_boundary",
-        type=str,
-        default=None,
-    )
-    parser.add_argument(
-        "--memory_size",
-        type=int,
-    )
-    parser.add_argument(
-        "--ret_embeddings_dim",
-        type=int,
-        default=768,
-    )
-    parser.add_argument(
-        "--preprocessing_num_workers",
-        type=int,
-        default=32,
-        help="The number of processes to use for the preprocessing.",
-    )
-    parser.add_argument(
-        "--overwrite_cache",
-        action="store_true",
-        help="Overwrite the cached training and evaluation sets",
-    )
-    parser.add_argument(
-        "--no_keep_linebreaks",
-        action="store_true",
-        help="Do not keep line breaks when using TXT files.",
-    )
-    parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Whether or not to push the model to the Hub.",
-    )
-    parser.add_argument(
-        "--hub_model_id",
-        type=str,
-        help="The name of the repository to keep in sync with the local `output_dir`.",
-    )
-    parser.add_argument(
-        "--hub_token", type=str, help="The token to use to push to the Model Hub."
-    )
-    parser.add_argument(
-        "--trust_remote_code",
-        type=bool,
-        default=False,
-        help=(
-            "Whether or not to allow for custom models defined on the Hub in their own modeling files. This option"
-            "should only be set to `True` for repositories you trust and in which you have read the code, as it will "
-            "execute code present on the Hub on your local machine."
-        ),
-    )
-    parser.add_argument(
-        "--checkpointing_steps",
-        type=str,
-        default=None,
-        help="Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch.",
-    )
-    parser.add_argument(
-        "--resume_from_checkpoint",
-        type=str,
-        default=None,
-        help="If the training should continue from a checkpoint folder.",
-    )
-    parser.add_argument(
-        "--with_tracking",
-        action="store_true",
-        help="Whether to enable experiment trackers for logging.",
-    )
-    parser.add_argument(
-        "--report_to",
-        type=str,
-        default="wandb",
+    parser.add_argument("--update_boundary",type=str,default=None,)
+    parser.add_argument("--memory_size",type=int,)
+    parser.add_argument("--ret_embeddings_dim",type=int,default=768,)
+    parser.add_argument("--preprocessing_num_workers",type=int,default=32,help="The number of processes to use for the preprocessing.",)
+    parser.add_argument("--overwrite_cache",action="store_true",help="Overwrite the cached training and evaluation sets",)
+    parser.add_argument("--no_keep_linebreaks",action="store_true",help="Do not keep line breaks when using TXT files.",)
+    parser.add_argument("--push_to_hub",action="store_true",help="Whether or not to push the model to the Hub.",)
+    parser.add_argument("--hub_model_id",type=str,help="The name of the repository to keep in sync with the local `output_dir`.",)
+    parser.add_argument("--hub_token", type=str, help="The token to use to push to the Model Hub.")
+    parser.add_argument("--trust_remote_code",type=bool,default=False,help=("Whether or not to allow for custom models defined on the Hub in their own modeling files. This option""should only be set to `True` for repositories you trust and in which you have read the code, as it will ""execute code present on the Hub on your local machine."),)
+    parser.add_argument("--checkpointing_steps",type=str,default=None,help="Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch.",)
+    parser.add_argument("--resume_from_checkpoint",type=str,default=None,help="If the training should continue from a checkpoint folder.",)
+    parser.add_argument("--with_tracking",action="store_true",help="Whether to enable experiment trackers for logging.",)
+    parser.add_argument("--report_to",type=str,default="wandb",
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`,'
             ' `"wandb"`, `"comet_ml"` and `"clearml"`. Use `"all"` (default) to report to all integrations. '
@@ -406,8 +171,7 @@ def parse_args():
     parser.add_argument("--wandb_id", type=str, default=None)
     parser.add_argument("--wandb_resume",type=str,default="auto",choices=["auto", "must", "never", "allow", None],)
     parser.add_argument("--log_step", type=int, default=10)
-    parser.add_argument("--low_cpu_mem_usage",
-        action="store_true",
+    parser.add_argument("--low_cpu_mem_usage",action="store_true",
         help=(
             "It is an option to create the model as an empty shell, then only materialize its parameters when the pretrained weights are loaded. "
             "If passed, LLM loading time and RAM consumption will be benefited."
@@ -443,13 +207,7 @@ def parse_args():
             raise ValueError(
                 "Need an `output_dir` to create a repo when `--push_to_hub` is passed."
             )
-    # condition -> args.chunk_size % args.pooling_tokens_size == 0
-    """
-    assert (
-        args.ret_granularity >= args.pooling_tokens
-        and args.ret_granularity % args.pooling_tokens == 0
-    ), "chunk_size should be larger than pooling_tokens_size and divisible by pooling_tokens_size"
-    """
+
     return args
 
 
@@ -667,19 +425,7 @@ def main():
             
     accelerator.print(llama_config)
     accelerator.print(toolkit_config)
-    """
-    special_tokens_dict = dict()
-    if tokenizer.pad_token is None:
-        special_tokens_dict["pad_token"] = DEFAULT_PAD_TOKEN
-    if tokenizer.eos_token is None:
-        special_tokens_dict["eos_token"] = DEFAULT_EOS_TOKEN
-    if tokenizer.bos_token is None:
-        special_tokens_dict["bos_token"] = DEFAULT_BOS_TOKEN
-    if tokenizer.unk_token is None:
-        special_tokens_dict["unk_token"] = DEFAULT_UNK_TOKEN
-
-    smart_tokenizer_and_embedding_resize(special_tokens_dict,tokenizer=tokenizer,model=model,)
-    """
+    
     # total_params = sum(p.numel() for p in retree.parameters())
     # estimate_zero2_model_states_mem_needs_all_live(etree, num_gpus_per_node=8, num_nodes=1)
     model.set_toolkit_tokenizer(tokenizer)
@@ -702,8 +448,7 @@ def main():
         set_freeze_by_idxs(model, range(lower, upper),freeze=True)
         if args.peft_model:
             model.print_trainable_parameters()
-    
-    
+
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
     # embedding_size = model.get_input_embeddings().weight.shape[0]

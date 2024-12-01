@@ -205,7 +205,6 @@ def parse_args():
 
     return args
 
-
 def evaluate(args, model, eval_dataloader, accelerator):
     model.eval()
     losses = []
@@ -224,7 +223,6 @@ def evaluate(args, model, eval_dataloader, accelerator):
     except OverflowError:
         perplexity = float("inf")
     return perplexity, eval_loss
-
 
 def main():
     args = parse_args()

@@ -1,35 +1,31 @@
 <h1 align="center">Welcome to MemLong 👋</h1>
 <p>
+  <img alt="Version" src="https://img.shields.io/badge/version-skip-blue.svg?cacheSeconds=2592000" />
 </p>
-
 
 > MemLong is a method that utilizes explicit retrievers to extend the context length of language models. It is compatible with any current Decoder-Only architecture model and requires only a small amount of fine-tuning data to achieve ultra-long length extension. 
 
-### 🏠 [Homepage](https://github.com/Bui1dMySea/MemLong) 📄
-
-<div align='center'>
-     <p>
-        <a href='https://arxiv.org/abs/2408.16967'><img src='https://img.shields.io/badge/arXiv-2408.16967-red'></a>
-        <img src='https://img.shields.io/github/stars/Bui1dMySea/MemLong?style=social&color=green
-' />
-        <img src="https://img.shields.io/badge/python->=3.9.11-blue">
-        <a href="https://pypi.org/project/lightrag-hku/"><img src="https://img.shields.io/pypi/v/lightrag-hku.svg"></a>
-    </p>
-
-
-
+### 🏠 [Homepage](https://github.com/Bui1dMySea/MemLong)
 ![MemLong](./asset/illustration.png)
+## Author
+
+👤 **Bui1dMySea**
+
+* Website: https://github.com/Bui1dMySea
+* Github: [@Bui1dMySea](https://github.com/Bui1dMySea)
 
 # What's MemLong?
+**Chunking**: For sequences of arbitrary length, we chunk them into fixed lengths (in our experiments, we used lengths of 256 and 512  ).  
 
-**Chunking**: For sequences of arbitrary length, we chunk them into fixed lengths (in our experiments, we used lengths of 256 and 512  ). 
-**Memory and Retrieval**: For the retrieval method, we innovatively proposed using an external retriever to search for the current chunk. The benefit of this approach is that it leverages the powerful retrieval capabilities of current models like bge-m3. For memory, we introduced dynamic memory planning. Specifically, our strategy differs from conventional FIFO (First In, First Out) by using a counter to calculate the trigger frequency of each chunk. When the memory length is exceeded, we prioritize deleting chunks with lower trigger frequencies until the required number of deletions is met. **Positional Encoding and Memory Fusion**: Our experiments found that if we reassign positional information for retrieved chunks and the current chunk, such as rearranging the original positional information from $c_k=(n_1,n_2,...,n_k)$ to $(r_1,r_2,...,r_n,c_k)$, it can lead to catastrophic information collapse. Therefore, we simply set the positional information of retrieved chunks to 0. Improving positional encoding will be addressed in future work. At the model's upper layer, we modified the attention mechanism so that the current query can access the retrieved chunks. 
-**Efficient Training**: During the fine-tuning phase, we only fine-tune the layers above the memory layer of the model. The advantage of this approach is that it significantly reduces the number of parameters to be fine-tuned compared to full fine-tuning, saving a lot of GPU memory. This is also why we only need a small amount of data.      
+**Memory and Retrieval**: For the retrieval method, we innovatively proposed using an external retriever to search for the current chunk. The benefit of this approach is that it leverages the powerful retrieval capabilities of current models like bge-m3. For memory, we introduced dynamic memory planning. Specifically, our strategy differs from conventional FIFO (First In, First Out) by using a counter to calculate the trigger frequency of each chunk. When the memory length is exceeded, we prioritize deleting chunks with lower trigger frequencies until the required number of deletions is met.       
+
+**Positional Encoding and Memory Fusion**: Our experiments found that if we reassign positional information for retrieved chunks and the current chunk, such as rearranging the original positional information from $c_k=(n_1,n_2,...,n_k)$ to $(r_1,r_2,...,r_n,c_k)$, it can lead to catastrophic information collapse. Therefore, we simply set the positional information of retrieved chunks to 0. Improving positional encoding will be addressed in future work. At the model's upper layer, we modified the attention mechanism so that the current query can access the retrieved chunks.     
+
+**Efficient Training**: During the fine-tuning phase, we only fine-tune the layers above the memory layer of the model. The advantage of this approach is that it significantly reduces the number of parameters to be fine-tuned compared to full fine-tuning, saving a lot of GPU memory. This is also why we only need a small amount of data. 
 
 # Quick Start
 
 ## Environment
-
 1. `conda create -n MemLong python=3.10`
 2. `conda activate MemLong`
 3. `pip install -r requirements.txt`
@@ -87,7 +83,8 @@ We provide two types of evaluations, including language modeling evaluation and 
 
 For language modeling tasks，you can first `cd eval/language_modeling` and then eval the model or method you want in `bash script/anything.sh` 
 
-
+## Instruction Tuning
+This code is coming soon.
 
 ## Author
 

@@ -61,15 +61,13 @@ from src.utils import (
     group_texts,
     save_config,
     ToolkitConfig,
-    smart_tokenizer_and_embedding_resize,
     tokenize_fn,
     set_freeze_by_idxs,
     convert_to_lora,
 )
+
 from src.configuration_llama import LlamaConfig
 from src.modeling_llama_position import LlamaForCausalLM
-
-
 from peft import PeftModel
 
 from deepspeed.runtime.zero.stage_1_and_2 import (estimate_zero2_model_states_mem_needs_all_live,)
@@ -83,9 +81,6 @@ DEFAULT_EOS_TOKEN = "</s>"
 DEFAULT_BOS_TOKEN = "<s>"
 DEFAULT_UNK_TOKEN = "<unk>"
 
-
-check_min_version("4.36.0.dev0")
-
 logger = get_logger(__name__)
 require_version(
     "datasets>=1.8.0",
@@ -98,18 +93,18 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")
 
     parser.add_argument("--load_from_disk",type=str,help="load dataset from disk")
-    parser.add_argument("--embedder_path",type=str,help="用于检索的 embedder 的路径")
-    parser.add_argument("--mem_layer",type=int,help="记忆层所在位置")
-    parser.add_argument("--ret_attn_layers",nargs="+",type=int,help="检索层所在位置")
-    parser.add_argument("--last_context_length",type=int,help="生成时最后一个上下文的长度")
-    parser.add_argument("--batch_sequential",default=False,action="store_true",help="是否按照顺序生成batch")
+    parser.add_argument("--embedder_path",type=str)
+    parser.add_argument("--mem_layer",type=int,help="set the memory layer ")
+    parser.add_argument("--ret_attn_layers",nargs="+",type=int,help="set the ret_attn_layers")
+    parser.add_argument("--last_context_length",type=int,help="argument for inference")
+    parser.add_argument("--batch_sequential",default=False,action="store_true")
     parser.add_argument("--clear_memories_on_eos_token_id", default=None, action="store_true")
     parser.add_argument("--clear_memories_on_bos_token_id", default=None, action="store_true")
     parser.add_argument("--circulate_steps",default=512,type=int)
-    parser.add_argument("--ret_group_size", type=int, help="每个块检索的数量")
-    parser.add_argument("--pooling_tokens", default=None, required=False,type=int, help="压缩的tokens数量")
-    parser.add_argument("--mem_group_size", type=int, help="mem粒度")
-    parser.add_argument("--use_gate",action="store_true",)
+    parser.add_argument("--ret_group_size", type=int, help="each group for retrieval")
+    parser.add_argument("--pooling_tokens", default=None, required=False,type=int, help="compress the tokens size")
+    parser.add_argument("--mem_group_size", type=int)
+    parser.add_argument("--use_gate",action="store_true")
     parser.add_argument("--use_gpu_to_search", action="store_true")
     parser.add_argument("--trainable_params",default=None,type=str,)
     parser.add_argument("--targets",default=None, type=str)
@@ -140,7 +135,7 @@ def parse_args():
     parser.add_argument("--num_warmup_steps",type=int,default=1000,help="Number of steps for the warmup in the lr scheduler.",)
     parser.add_argument("--output_dir",type=str,required=True,help="Where to store the final model.",)
     parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
-    parser.add_argument("--model_type",type=str,default=None,help="Model type to use if training from scratch.",choices=MODEL_TYPES,)
+    parser.add_argument("--model_type",type=str,default=None,help="Model type to use if training from scratch.",choices=MODEL_TYPES)
     parser.add_argument("--block_size",type=int,default=None,help=("Optional input sequence length after tokenization. The training dataset will be truncated in block of"" this size for training. Default to the model max input length for single sentence inputs (take into"" account special tokens)."),)
     parser.add_argument("--train_mode",type=str,default=None,required=True,choices=["lora-all", "lora-freeze", "partial-lora","partial-freeze"],)
     parser.add_argument("--continual_finetuning",action="store_true",)
@@ -177,11 +172,11 @@ def parse_args():
             "If passed, LLM loading time and RAM consumption will be benefited."
         ),
     )
+    
     parser.add_argument("--load_best_model", action="store_true")
     parser.add_argument("--dataset_tokenizer", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--peft_model",type=str,default=None)
-
     args = parser.parse_args()
     if args.load_from_disk is not None:
         pass
@@ -241,6 +236,7 @@ def main():
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
+    
     accelerator_log_kwargs = {}
 
     if args.with_tracking:
@@ -511,7 +507,7 @@ def main():
             )
 
     if tokenized_datasets is None:
-    
+        # breakpoint()
         train_dataset = lm_datasets["train"]
         eval_dataset = lm_datasets["validation"]
     else:

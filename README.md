@@ -2,7 +2,9 @@
 
 > MemLong is a method that utilizes explicit retrievers to extend the context length of language models. It is compatible with any current Decoder-Only architecture model and requires only a small amount of fine-tuning data to achieve ultra-long length extension. 
 
-### 🏠 [Homepage](https://github.com/Bui1dMySea/MemLong)
+### 🏠 [Homepage](https://github.com/Bui1dMySea/MemLong) 
+![Static Badge](https://img.shields.io/badge/arxiv-2408.16967-blue?labelColor=red&link=https%3A%2F%2Farxiv.org%2Fpdf%2F2408.16967)
+
 ![MemLong](./asset/illustration.png)
 ## Author
 

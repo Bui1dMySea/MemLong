@@ -46,7 +46,6 @@ einx==0.3.0
 encodec==0.1.1
 exceptiongroup==1.2.2
 executing==2.1.0
-faiss==1.9.0
 fastapi==0.115.5
 ffmpy==0.4.0
 filelock==3.15.4
@@ -153,7 +152,7 @@ ollama==0.3.3
 openai==1.40.6
 oracledb==2.5.0
 orjson==3.10.7
-packaging @ file:///croot/packaging_1720101850331/work
+packaging
 pandas==2.2.2
 parso==0.8.4
 patsy==1.0.1

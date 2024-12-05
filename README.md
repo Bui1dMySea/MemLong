@@ -28,6 +28,7 @@
 1. `conda create -n MemLong python=3.10`
 2. `conda activate MemLong`
 3. `pip install -r requirements.txt`
+4. `conda install -c pytorch -c nvidia faiss-gpu=1.9.0`
 
 ## Data Processing
 
